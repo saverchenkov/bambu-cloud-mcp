@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { FleetManager } from "../fleet-manager.js";
+import { isDualNozzleModel, normalizeModel } from "../h2d.js";
 
 const SPEED_PROFILES: Record<string, number> = {
   silent: 1,
@@ -10,7 +11,9 @@ const SPEED_PROFILES: Record<string, number> = {
 };
 
 const MAX_NOZZLE_TEMP = 300;
+const MAX_H2_NOZZLE_TEMP = 350;
 const MAX_BED_TEMP = 120;
+const MAX_CHAMBER_TEMP = 65;
 
 export function registerHardwareTools(
   server: McpServer,
@@ -100,41 +103,76 @@ export function registerHardwareTools(
 
   server.tool(
     "set_temperature",
-    "Set nozzle or bed temperature on a printer. Includes safety limits (nozzle max 300C, bed max 120C).",
+    "Set nozzle, bed, or active chamber temperature on a printer. Supports targeting left/right nozzle on dual-nozzle printers (H2D/H2C/X2D). Includes safety limits (nozzle max 300°C or 350°C on H2 series, bed max 120°C, chamber max 65°C).",
     {
       printer: z
         .string()
         .optional()
         .describe("Printer ID, 'all', or omit for single printer"),
       target: z
-        .enum(["nozzle", "bed"])
+        .enum(["nozzle", "bed", "chamber"])
         .describe("Which heater to set"),
       temperature: z
         .number()
         .describe("Target temperature in Celsius. Use 0 to turn off."),
+      nozzle: z
+        .enum(["active", "left", "right"])
+        .optional()
+        .describe(
+          "Dual-nozzle printers (H2D/H2C/X2D) only: which nozzle to heat ('right' = T0, 'left' = T1, 'active' = currently active). Ignored for bed/chamber.",
+        ),
     },
-    async ({ printer, target, temperature }) => {
-      const maxTemp = target === "nozzle" ? MAX_NOZZLE_TEMP : MAX_BED_TEMP;
-
-      if (temperature < 0 || temperature > maxTemp) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Temperature must be between 0 and ${maxTemp}°C for ${target}.`,
-            },
-          ],
-        };
-      }
-
-      const gcode =
-        target === "nozzle"
-          ? `M104 S${temperature}`
-          : `M140 S${temperature}`;
-
+    async ({ printer, target, temperature, nozzle }) => {
       return fleet.executeOnPrinters(printer, async (conn) => {
+        const model = normalizeModel(conn.config.model);
+        const dual = isDualNozzleModel(model);
+        const maxNozzle = model.startsWith("H2")
+          ? MAX_H2_NOZZLE_TEMP
+          : MAX_NOZZLE_TEMP;
+        const maxTemp =
+          target === "nozzle"
+            ? maxNozzle
+            : target === "bed"
+              ? MAX_BED_TEMP
+              : MAX_CHAMBER_TEMP;
+
+        if (temperature < 0 || temperature > maxTemp) {
+          throw new Error(
+            `Temperature must be between 0 and ${maxTemp}°C for ${target}.`,
+          );
+        }
+
+        let gcode: string;
+        let label: string = target;
+
+        if (target === "nozzle") {
+          if (nozzle === "left" || nozzle === "right") {
+            if (!dual) {
+              throw new Error(
+                `Printer '${conn.config.name}' (${conn.config.model || "unknown"}) is not a dual-nozzle model; omit 'nozzle' or use 'active'.`,
+              );
+            }
+            const toolIdx = nozzle === "left" ? 1 : 0;
+            gcode = `M104 T${toolIdx} S${temperature}\n`;
+            label = `${nozzle} nozzle (T${toolIdx})`;
+          } else {
+            gcode = `M104 S${temperature}\n`;
+          }
+        } else if (target === "bed") {
+          gcode = `M140 S${temperature}\n`;
+        } else {
+          // Chamber heater (H2 series / X1E): M145 toggles chamber circulation mode on H2
+          if (model === "X1E") {
+            gcode = `M141 S${temperature}\n`;
+          } else if (temperature > 40) {
+            gcode = `M145 P1\nM141 S${temperature}\n`;
+          } else {
+            gcode = `M141 S${temperature}\nM145 P0\n`;
+          }
+        }
+
         await conn.mqtt.sendGcode(gcode);
-        return `${target} temperature set to ${temperature}°C.`;
+        return `${label} temperature set to ${temperature}°C.`;
       });
     },
   );

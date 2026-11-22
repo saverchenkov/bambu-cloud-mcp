@@ -16,6 +16,8 @@ import { registerSigningTools } from "./tools/signing.js";
 import { registerCloudTools, syncCloudPrinters } from "./tools/cloud.js";
 import { loadCloud } from "./cloud-store.js";
 
+const READ_ONLY = /^(1|true|yes)$/i.test(process.env.BAMBU_READ_ONLY || "");
+
 const server = new McpServer({
   name: "bambu-farm",
   version: "1.0.0",
@@ -23,24 +25,31 @@ const server = new McpServer({
 
 const fleet = new FleetManager();
 
-// Register all tools
-registerManagementTools(server, fleet);
+// Always register read-only status, fleet listing/reconnect, cloud sync, and LAN snapshot tools
+registerManagementTools(server, fleet, { readOnly: READ_ONLY });
 registerStatusTools(server, fleet);
-registerPrintControlTools(server, fleet);
-registerHardwareTools(server, fleet);
-registerFileTools(server, fleet);
-registerCameraTools(server, fleet);
-registerAmsTools(server, fleet);
-registerGcodeTools(server, fleet);
-registerSigningTools(server);
-registerCloudTools(server, fleet);
+registerCameraTools(server, fleet, { readOnly: READ_ONLY });
+registerCloudTools(server, fleet, { readOnly: READ_ONLY });
+
+if (!READ_ONLY) {
+  registerPrintControlTools(server, fleet);
+  registerHardwareTools(server, fleet);
+  registerFileTools(server, fleet);
+  registerAmsTools(server, fleet);
+  registerGcodeTools(server, fleet);
+  registerSigningTools(server);
+} else {
+  console.error(
+    "Running in READ-ONLY mode (BAMBU_READ_ONLY=true); write and printer-control tools are disabled.",
+  );
+}
 
 // Connect to all configured printers on startup
 async function connectConfiguredPrinters(): Promise<void> {
   const config = loadConfig();
   if (config.printers.length === 0) {
     console.error(
-      "No printers configured. Use the add_printer tool to add one.",
+      "No printers configured. Use add_printer or run `npm run login` + sync_cloud_printers.",
     );
     return;
   }

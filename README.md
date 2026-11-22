@@ -19,8 +19,10 @@ Most community Bambu MCP servers only do **LAN** control, or **read-only** cloud
 
 ## Supported printers
 
-- **Control (LAN + cloud):** A1, A1 Mini, P1P, P1S, X1C, X1E, H2D and other current models.
-- **Camera (LAN only):** A1, A1 Mini, P1P, P1S via the port-6000 chamber-image protocol. X1/H2 series use RTSP instead and aren't wired up yet — PRs welcome.
+- **Control (LAN + cloud):** A1, A1 Mini, P1P, P1S, X1C, X1E, H2D (including dual-nozzle telemetry/temperature control, active chamber heater, and multi-AMS / AMS HT) and other current models.
+- **Camera (LAN only):**
+  - **A1, A1 Mini, P1P, P1S:** direct TLS port-6000 chamber-image protocol.
+  - **X1, X1C, X1E, H2D, H2S, H2C, P2S:** RTSPS on TCP port 322 (`rtsps://bblp:<access_code>@<ip>:322/streaming/live/1`) via `ffmpeg`. Requires **"LAN Mode Liveview"** enabled on the printer (independent of full LAN-Only mode — Bambu Handy keeps working).
 
 ## Tools
 
@@ -85,8 +87,9 @@ All 31 tools, grouped by area:
 ### Camera (LAN only)
 | Tool | Description |
 |---|---|
-| `get_camera_frame` | Capture a live JPEG from the chamber camera, returned as an image |
+| `get_camera_frame` | Capture a live JPEG from the chamber camera (port-6000 for A1/P1, RTSPS via `ffmpeg` for X1/H2/P2), returned as an image |
 | `set_camera_access` | Store a printer's LAN access code (and optional IP) for the camera |
+| `set_liveview_camera` | Switch liveview camera on multi-camera printers (`main` vs `birdseye` on H2D) |
 | `set_recording` | Toggle SD-card recording |
 | `set_timelapse` | Toggle timelapse |
 
@@ -171,6 +174,8 @@ All are optional:
 | Variable | Purpose |
 |---|---|
 | `BAMBU_MCP_CONFIG_DIR` | Directory for runtime config and credentials. Default: `~/.bambu-mcp`. |
+| `BAMBU_READ_ONLY` | Set to `true` (or `1`) to disable all printer-control and write tools, exposing only status, listing, cloud sync, and LAN camera snapshots. |
+| `BAMBU_FFMPEG_PATH` | Optional path to the `ffmpeg` binary used for X1/H2/P2 RTSPS camera snapshots (defaults to `ffmpeg` on `PATH`). |
 | `BAMBU_APP_PRIVATE_KEY` | Override the bundled X.509 private key used by `sign_message`. |
 | `BAMBU_APP_CERTIFICATE` | Override the bundled X.509 certificate used by `sign_message`. |
 

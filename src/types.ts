@@ -42,16 +42,20 @@ export interface PrinterStatus {
     ams?: Array<{
       id: string;
       humidity: string;
+      humidity_raw?: string | number;
       temp: string;
+      dry_time?: number;
       tray?: Array<{
         id: string;
         tray_color?: string;
         tray_type?: string;
+        tray_sub_brands?: string;
         remain?: number;
       }>;
     }>;
     ams_exist_bits?: string;
     tray_now?: string;
+    tray_tar?: string;
   };
 
   lights_report?: Array<{
@@ -62,11 +66,82 @@ export interface PrinterStatus {
   print_error?: number;
   hw_switch_state?: number;
   wifi_signal?: string;
+  nozzle_diameter?: string | number;
+  nozzle_type?: string;
+
+  hms?: Array<{
+    attr?: number;
+    code?: number;
+    [key: string]: any;
+  }>;
+
+  net?: {
+    info?: Array<{
+      ip?: number;
+      mask?: number;
+    }>;
+  };
+
+  device?: {
+    extruder?: {
+      /** Low 4 bits = extruder count; bits 4..7 = active extruder (0=right, 1=left, 15=switching). */
+      state?: number;
+      info?: Array<{
+        id: number;
+        /** Packed 32-bit temp: low 16 bits = current °C, high 16 bits = target °C. */
+        temp?: number;
+        /** Loaded tray encoded as (amsIndex << 8) | trayIndex. */
+        snow?: number;
+        star?: number;
+        hnow?: number;
+        info?: number;
+        [key: string]: any;
+      }>;
+    };
+    nozzle?: {
+      info?:
+        | Array<{
+            id: number;
+            diameter?: number | string;
+            type?: string;
+            [key: string]: any;
+          }>
+        | number;
+      [key: string]: any;
+    };
+    bed?: {
+      info?: {
+        /** Packed 32-bit temp: low 16 bits = current °C, high 16 bits = target °C. */
+        temp?: number;
+      };
+      state?: number;
+    };
+    ctc?: {
+      info?: {
+        /** Packed 32-bit chamber temp: low 16 bits = current °C, high 16 bits = target °C. */
+        temp?: number;
+      };
+      state?: number;
+    };
+    fila_switch?: {
+      in?: number[];
+      out?: number[];
+    };
+    airduct?: {
+      modeCur?: number;
+      modeList?: Array<{ modeId: number }>;
+    };
+    [key: string]: any;
+  };
 
   ipcam?: {
     ipcam_record?: string;
     timelapse?: string;
     resolution?: string;
+    rtsp_url?: string;
+    current_liveview?: number;
+    support_liveview_cams?: number[];
+    [key: string]: any;
   };
 
   [key: string]: any;

@@ -18,9 +18,11 @@ const PRINTER_ID_PARAM = z
 export function registerManagementTools(
   server: McpServer,
   fleet: FleetManager,
+  options: { readOnly?: boolean } = {},
 ): void {
-  server.tool(
-    "add_printer",
+  if (!options.readOnly) {
+    server.tool(
+      "add_printer",
     "Add a Bambu Lab printer to the fleet. Saves config and connects via MQTT.",
     {
       id: z
@@ -108,6 +110,7 @@ export function registerManagementTools(
       };
     },
   );
+  }
 
   server.tool(
     "reconnect_printer",

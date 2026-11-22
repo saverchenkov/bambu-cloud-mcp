@@ -16,19 +16,25 @@ export function registerAmsTools(
         .describe("Printer ID or omit for single printer"),
       tray: z
         .number()
-        .describe("AMS tray number (0-3)"),
+        .describe(
+          "AMS tray index: 0-3 for AMS A, 4-15 for additional AMS units (B-D), 128-135 for AMS HT, or 254 for external spool",
+        ),
       target_temp: z
         .number()
         .optional()
         .describe("Target temperature for the filament change (°C). Optional."),
     },
     async ({ printer, tray, target_temp }) => {
-      if (tray < 0 || tray > 3) {
+      const valid =
+        (tray >= 0 && tray <= 15) ||
+        (tray >= 128 && tray <= 135) ||
+        tray === 254;
+      if (!valid) {
         return {
           content: [
             {
               type: "text" as const,
-              text: "Tray number must be between 0 and 3.",
+              text: "Tray number must be 0-15 (AMS units A-D), 128-135 (AMS HT), or 254 (external spool).",
             },
           ],
         };

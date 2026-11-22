@@ -10,6 +10,48 @@ export interface MQTTConfig {
   model?: string;
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge incremental Bambu MQTT status payloads without clobbering sibling nested keys.
+ * Essential for H2-series printers where `device.extruder`, `device.bed`, `device.ctc`,
+ * `device.nozzle`, and `ipcam` frequently arrive in separate partial delta packets.
+ */
+export function mergeStatus(
+  prev: Record<string, any>,
+  next: Record<string, any>,
+): Record<string, any> {
+  const out: Record<string, any> = { ...prev };
+  for (const [key, val] of Object.entries(next)) {
+    if (val === undefined) continue;
+    const prevVal = out[key];
+    if (isPlainObject(prevVal) && isPlainObject(val)) {
+      out[key] = mergeStatus(prevVal, val);
+    } else if (
+      key === "info" &&
+      Array.isArray(prevVal) &&
+      Array.isArray(val) &&
+      val.every((item) => isPlainObject(item) && typeof item.id === "number") &&
+      prevVal.every((item) => isPlainObject(item) && typeof item.id === "number")
+    ) {
+      // Merge per-id entries (e.g. device.extruder.info / device.nozzle.info) so a
+      // single-nozzle delta doesn't drop the other nozzle's cached fields.
+      const byId = new Map<number, Record<string, any>>();
+      for (const item of prevVal) byId.set(item.id, { ...item });
+      for (const item of val) {
+        const existing = byId.get(item.id);
+        byId.set(item.id, existing ? mergeStatus(existing, item) : { ...item });
+      }
+      out[key] = Array.from(byId.values());
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
 export class BambuMQTTClient {
   private client: mqtt.MqttClient | null = null;
   private config: MQTTConfig;
@@ -85,7 +127,7 @@ export class BambuMQTTClient {
           const data = JSON.parse(payload.toString());
           const status = data.print || data.mc_print;
           if (status) {
-            this.lastStatus = { ...this.lastStatus, ...status };
+            this.lastStatus = mergeStatus(this.lastStatus, status);
             this.lastStatusTime = Date.now();
           }
         } catch {}
@@ -408,6 +450,15 @@ export class BambuMQTTClient {
   async setTimelapse(enabled: boolean): Promise<any> {
     return this.sendCommand("camera.ipcam_timelapse", {
       control: enabled ? "enable" : "disable",
+    });
+  }
+
+  /** Switch active liveview camera on H2-series printers (4 = main chamber, 5 = birdseye). */
+  async setLiveviewCamera(cameraId: number): Promise<any> {
+    return this.sendCommand("camera.change_liveview_cam_idx", {
+      camera_id: cameraId,
+      peer_name: "studio",
+      version: 1,
     });
   }
 

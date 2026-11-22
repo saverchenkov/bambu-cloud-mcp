@@ -110,6 +110,7 @@ export async function syncCloudPrinters(
 export function registerCloudTools(
   server: McpServer,
   fleet: FleetManager,
+  options: { readOnly?: boolean } = {},
 ): void {
   server.tool(
     "cloud_status",
@@ -188,26 +189,28 @@ export function registerCloudTools(
     },
   );
 
-  server.tool(
-    "cloud_logout",
-    "Log out of Bambu cloud: delete stored cloud credentials and disconnect cloud printers. LAN printers are unaffected.",
-    {},
-    async () => {
-      const cloudPrinters = loadConfig().printers.filter(
-        (p) => p.mode === "cloud",
-      );
-      for (const p of cloudPrinters) fleet.disconnectPrinter(p.id);
-      const cleared = clearCloud();
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: cleared
-              ? `Logged out. Cleared credentials and disconnected ${cloudPrinters.length} cloud printer(s). (Cloud printer entries remain in config but won't connect until you log in again.)`
-              : "No cloud credentials were stored.",
-          },
-        ],
-      };
-    },
-  );
+  if (!options.readOnly) {
+    server.tool(
+      "cloud_logout",
+      "Log out of Bambu cloud: delete stored cloud credentials and disconnect cloud printers. LAN printers are unaffected.",
+      {},
+      async () => {
+        const cloudPrinters = loadConfig().printers.filter(
+          (p) => p.mode === "cloud",
+        );
+        for (const p of cloudPrinters) fleet.disconnectPrinter(p.id);
+        const cleared = clearCloud();
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: cleared
+                ? `Logged out. Cleared credentials and disconnected ${cloudPrinters.length} cloud printer(s). (Cloud printer entries remain in config but won't connect until you log in again.)`
+                : "No cloud credentials were stored.",
+            },
+          ],
+        };
+      },
+    );
+  }
 }
