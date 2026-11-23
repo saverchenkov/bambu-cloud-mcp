@@ -6,14 +6,32 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-server-000000)](https://modelcontextprotocol.io)
 
-An [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server that lets an AI assistant — Claude Code, Claude Desktop, or any MCP client — monitor and drive Bambu Lab printers. It talks to printers over MQTT, either on your **LAN** or through the **Bambu cloud broker** (`us.mqtt.bambulab.com` / `cn.mqtt.bambulab.com`), so status and control work from anywhere without putting the printer into LAN-Only mode. It ships **31 tools** covering status, print control, temperatures, AMS/filament, files, and a live LAN chamber-camera snapshot.
+An [MCP](https://modelcontextprotocol.io) (Model Context Protocol) server that lets an AI assistant — Claude Code, Claude Desktop, Antigravity, or any MCP client — monitor and drive Bambu Lab printers. It talks to printers over MQTT, either on your **LAN** or through the **Bambu cloud broker** (`us.mqtt.bambulab.com` / `cn.mqtt.bambulab.com`), so status and control work from anywhere without putting the printer into LAN-Only mode. It ships **32 tools** covering status, print control, temperatures, AMS/filament, files, and live LAN chamber-camera snapshots.
+
+> **Fork notice:** This repository is a fork of [dylansantwani/bambu-cloud-mcp](https://github.com/dylansantwani/bambu-cloud-mcp) by **Dylan Santwani**. All core cloud MQTT control, passwordless email-code login, port-6000 LAN camera capture, and CLI work comes from the upstream repo.
+
+## What's different in this fork
+
+Compared to [dylansantwani/bambu-cloud-mcp](https://github.com/dylansantwani/bambu-cloud-mcp), this fork adds:
+
+- **H2D / dual-nozzle telemetry & control** (`src/h2d.ts`, `src/tools/status.ts`, `src/tools/hardware.ts`):
+  - Parses H2-series packed 32-bit temperatures (`device.extruder.info`, `device.bed.info`, `device.ctc.info`) for **Left (`T1`) and Right (`T0`) nozzles**, active nozzle state, nozzle size/material codes (`HS01`, `HH01`, etc.), loaded filament source per nozzle, active chamber heater target/current temp, and HMS alerts.
+  - Extends `set_temperature` to target `nozzle: "left" | "right" | "active"` (up to `350°C` on H2 hotends) and `target: "chamber"`.
+- **Deep MQTT status merging** (`src/mqtt-client.ts`):
+  - Replaces shallow status merging with nested deep merging (including merging `device.extruder.info` and `device.nozzle.info` by `id`) so partial H2D delta packets no longer overwrite sibling subsystems.
+- **Multi-AMS & AMS HT support** (`src/tools/status.ts`, `src/tools/ams.ts`):
+  - Groups AMS units (`AMS A–D`, `AMS HT 1–8`) with `% RH`, temperature, tray remaining `%`, and active drying countdowns, and widens `change_filament` tray indices to `0–15` (AMS A–D), `128–135` (AMS HT), and `254` (external spool).
+- **H2D / X1 / P2 RTSPS camera snapshots** (`src/camera-client.ts`, `src/tools/camera.ts`):
+  - Extends `get_camera_frame` with automatic **RTSPS (TCP port 322)** frame capture via `ffmpeg` for X1 / H2D / H2S / H2C / P2S printers (while keeping TLS port 6000 for A1 / P1), auto-extracting LAN IP from `ipcam.rtsp_url`, redacting credentials in errors, and adding `set_liveview_camera` (`main` vs `birdseye` on H2D).
+- **Opt-in read-only mode (`BAMBU_READ_ONLY=true`)** (`src/index.ts`):
+  - Disables all printer-control and write tools when `BAMBU_READ_ONLY=true` (or `1`), exposing only the 8 monitoring and LAN camera snapshot tools (`list_printers`, `reconnect_printer`, `get_status`, `get_version`, `cloud_status`, `sync_cloud_printers`, `get_camera_frame`, `set_camera_access`).
 
 ## Why this over other Bambu MCP servers
 
 Most community Bambu MCP servers only do **LAN** control, or **read-only** cloud status. This one does two things they usually don't:
 
-- **Full cloud control** — every command (pause, resume, stop, set temp, change filament, raw G-code…) works over the internet, because the Bambu cloud MQTT broker accepts the same command topics (`device/<serial>/request`) as the local one. Log in once with your account and your bound printers auto-connect.
-- **Live chamber camera** — `get_camera_frame` pulls a real JPEG snapshot from A1 / A1 Mini / P1P / P1S printers over the LAN and returns it as an image your MCP client can display.
+- **Full cloud control** — every command (pause, resume, stop, set temp, change filament, raw G-code…) works over the internet, because the Bambu cloud MQTT broker accepts the same command topics (`device/<serial>/request`) as the local one. Log in once with your account and your bound printers auto-connect. (Or set `BAMBU_READ_ONLY=true` if you want strictly read-only monitoring.)
+- **Live chamber camera** — `get_camera_frame` pulls a real JPEG snapshot from A1 / P1 (TLS port 6000) and X1 / H2 / P2 (RTSPS port 322 via `ffmpeg`) printers over the LAN and returns it as an image your MCP client can display.
 
 > **Camera is LAN-only.** Bambu tunnels the cloud video feed through a proprietary P2P system (TUTK) that can't be reimplemented in the open, so the camera works only when your machine is on the same network as the printer. Status and control work from anywhere.
 
@@ -26,7 +44,7 @@ Most community Bambu MCP servers only do **LAN** control, or **read-only** cloud
 
 ## Tools
 
-All 31 tools, grouped by area:
+All 32 tools, grouped by area:
 
 ### Cloud
 | Tool | Description |
@@ -60,7 +78,7 @@ All 31 tools, grouped by area:
 | Tool | Description |
 |---|---|
 | `set_speed` | Print speed (profile name or percentage) |
-| `set_temperature` | Nozzle / bed temperature (with safety limits) |
+| `set_temperature` | Nozzle (including left/right on dual-nozzle printers), bed, or chamber temperature (with safety limits) |
 | `set_light` | Chamber / work light on or off |
 | `set_nozzle` | Nozzle diameter (for slicer profiles) |
 
@@ -102,12 +120,12 @@ All 31 tools, grouped by area:
 
 - **Node.js 18+**
 - For **cloud control:** a Bambu Lab account (the one your printers are bound to). No developer token needed — you log in with an emailed code, password, or 2FA.
-- For the **camera:** your machine on the same LAN as the printer, with **"LAN Mode Liveview" enabled** on the printer (Settings). This is independent of full LAN-Only mode, so the Bambu Handy app keeps working.
+- For the **camera:** your machine on the same LAN as the printer, with **"LAN Mode Liveview" enabled** on the printer (Settings). This is independent of full LAN-Only mode, so the Bambu Handy app keeps working. X1 / H2 / P2 series cameras additionally require `ffmpeg` on your `PATH` (or `BAMBU_FFMPEG_PATH` set).
 
 ## Installation
 
 ```bash
-git clone https://github.com/dylansantwani/bambu-cloud-mcp.git
+git clone https://github.com/saverchenkov/bambu-cloud-mcp.git
 cd bambu-cloud-mcp
 npm install
 npm run build
@@ -234,17 +252,18 @@ A printer's `mode` decides how its MQTT client connects:
 - **LAN mode** connects to the printer's IP with username `bblp` + the printer's access code.
 - **Cloud mode** connects to `us.mqtt.bambulab.com` (or `cn.` for China) with username `u_<uid>` + your account token.
 
-The command topics (`device/<serial>/request` and `/report`) are identical in both, which is why every control tool works the same over the cloud as on the LAN. File operations use FTPS (`basic-ftp`), and the chamber camera speaks the printer's TLS port-6000 image protocol directly (`camera-client.ts`).
+The command topics (`device/<serial>/request` and `/report`) are identical in both, which is why every control tool works the same over the cloud as on the LAN. File operations use FTPS (`basic-ftp`), and chamber camera snapshots use TLS port 6000 for A1/P1 or RTSPS port 322 via `ffmpeg` for X1/H2/P2 (`camera-client.ts`).
 
 ```
 src/
-  index.ts            MCP server entry; registers tools, auto-connects on startup
+  index.ts            MCP server entry; registers tools (respecting BAMBU_READ_ONLY), auto-connects on startup
   fleet-manager.ts    Multi-printer connection manager (LAN + cloud branches)
-  mqtt-client.ts      Bambu MQTT protocol (status + all control commands)
+  mqtt-client.ts      Bambu MQTT protocol (deep-merged status + all control commands)
+  h2d.ts              H2D / dual-nozzle telemetry, packed temps, nozzle & multi-AMS/AMS HT helpers
   bambu-cloud.ts      Cloud API: login, email-code/2FA, device discovery, refresh
   cloud-store.ts      ~/.bambu-mcp/cloud.json credential store
   login-cli.ts        Interactive `npm run login`
-  camera-client.ts    LAN chamber-image capture (TLS port 6000 → JPEG)
+  camera-client.ts    LAN camera capture (TLS port 6000 for A1/P1, RTSPS port 322 via ffmpeg for X1/H2/P2)
   camera-store.ts     ~/.bambu-mcp/cameras.json access-code store
   ftp-client.ts       FTPS file operations
   tools/              One file per tool group
@@ -266,9 +285,10 @@ Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for dev s
 
 ## Credits
 
-- **LAN control base:** [griches/bambu-mcp](https://github.com/griches/bambu-mcp) — the original MQTT control layer and local toolset this project forks and builds on.
-- **Cloud control, passwordless login, and LAN camera capture** are original additions in this fork.
-- Cloud protocol details informed by [ha-bambulab / pybambu](https://github.com/greghesp/ha-bambulab); camera protocol per community reverse-engineering documented on the [Bambu Lab forums](https://forum.bambulab.com/t/p1p-camera-module-communication-standard/6829).
+- **Original cloud MCP server (`bambu-cloud-mcp`):** [Dylan Santwani (dylansantwani/bambu-cloud-mcp)](https://github.com/dylansantwani/bambu-cloud-mcp) — author of the cloud control layer, passwordless login, port-6000 LAN camera capture, and standalone CLI that this fork builds on.
+- **Original LAN control base:** [griches/bambu-mcp](https://github.com/griches/bambu-mcp) — the original MQTT control layer and local toolset that `dylansantwani/bambu-cloud-mcp` forks and builds on.
+- **This fork (`saverchenkov/bambu-cloud-mcp`):** adds H2D dual-nozzle & multi-AMS/AMS HT telemetry/control, deep MQTT delta merging, X1/H2/P2 RTSPS camera snapshots (`ffmpeg`) + liveview camera switching, and opt-in `BAMBU_READ_ONLY` mode.
+- **Protocol references:** Cloud protocol, H2D dual-nozzle telemetry, and RTSPS camera handling informed by [ha-bambulab / pybambu](https://github.com/greghesp/ha-bambulab); A1/P1 port-6000 camera protocol per community reverse-engineering documented on the [Bambu Lab forums](https://forum.bambulab.com/t/p1p-camera-module-communication-standard/6829).
 
 ## License
 
