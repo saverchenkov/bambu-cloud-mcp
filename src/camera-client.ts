@@ -154,6 +154,8 @@ function runFfmpegSnapshot(
     "error",
     "-rtsp_transport",
     "tcp",
+    "-tls_verify",
+    "0",
     "-i",
     rtspUrl,
     "-frames:v",

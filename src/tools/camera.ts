@@ -41,9 +41,13 @@ export function registerCameraTools(
       const conn = fleet.resolvePrinters(printer)[0];
       const serial = conn.config.serialNumber;
 
-      // Inspect cached status first; pull fresh status if IP or RTSP URL isn't populated yet.
+      // Inspect cached status first; pull fresh status if IP/RTSP URL isn't populated
+      // yet or was previously "disable" (in case LAN Mode Liveview was just toggled on).
       let st = conn.mqtt.getCachedStatus();
-      if (!st.net?.info?.[0]?.ip && !st.ipcam?.rtsp_url) {
+      if (
+        (!st.net?.info?.[0]?.ip && !st.ipcam?.rtsp_url) ||
+        st.ipcam?.rtsp_url === "disable"
+      ) {
         try {
           st = await conn.mqtt.requestStatus();
         } catch {}
