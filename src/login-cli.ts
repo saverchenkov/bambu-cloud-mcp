@@ -23,6 +23,8 @@ import {
   type LoginResult,
 } from "./bambu-cloud.js";
 import { saveCloud, getCloudPath, type CloudCredentials } from "./cloud-store.js";
+import { addPrinterToConfig } from "./config.js";
+import { mqttHostForRegion } from "./cloud-store.js";
 
 function ask(question: string, muted = false): Promise<string> {
   const mutable = new Writable({
@@ -98,15 +100,27 @@ async function main() {
     process.exit(1);
   }
 
-  // The JWT doesn't always carry the MQTT username — resolve it from the API.
+  // The JWT doesn't always carry the MQTT username — resolve it from the API,
+  // falling back to manual entry if Bambu's profile endpoint is gated by Cloudflare.
   if (!result.username) {
     try {
       result.username = await getAccountUsername(result.accessToken, region);
     } catch (e: any) {
-      console.error(
-        `\nLogged in, but could not resolve your MQTT user id: ${e.message}`,
+      console.log(
+        `\nLogged in, but automatic MQTT user ID lookup failed (${e.message.slice(0, 140)}).`,
       );
-      process.exit(1);
+      console.log(
+        "Your login token is valid — you can enter your Bambu numeric user ID manually to finish.",
+      );
+      console.log(
+        "(Tip: On Windows, Bambu Studio stores it as `uid` in %APPDATA%\\BambuStudio\\BambuStudio.conf, or find your `u_<digits>` ID on MakerWorld / Bambu Studio logs.)",
+      );
+      const manualUid = await ask("Bambu user ID (digits or u_<digits>): ");
+      if (!manualUid) {
+        console.error("Aborted: MQTT user ID is required to connect to Bambu Cloud MQTT.");
+        process.exit(1);
+      }
+      result.username = manualUid.startsWith("u_") ? manualUid : `u_${manualUid}`;
     }
   }
   console.log(`  MQTT user: ${result.username}`);
@@ -138,11 +152,34 @@ async function main() {
         );
       }
       console.log(
-        "\nThe MCP server will auto-connect these on next start. In Claude, you can also run the `sync_cloud_printers` tool.",
+        "\nThe MCP server will auto-connect these on next start. You can also run the `sync_cloud_printers` tool.",
       );
     }
   } catch (e: any) {
-    console.log(`Could not list devices: ${e.message}`);
+    console.log(`Could not auto-list cloud printers (${e.message.slice(0, 140)}).`);
+    console.log(
+      "You can still register your cloud printer directly (it will connect straight to Bambu Cloud MQTT without needing the device-list API).",
+    );
+    const serial = await ask(
+      "Printer serial number (from printer touchscreen Settings → Device, or leave blank to skip): ",
+    );
+    if (serial) {
+      const name = (await ask("Friendly printer name [My Bambu]: ")) || "My Bambu";
+      const model = (await ask("Printer model (e.g. H2D, X1C, P1S, A1) [H2D]: ")) || "H2D";
+      const id = `cloud-${serial}`;
+      addPrinterToConfig({
+        id,
+        name: `${name} (cloud)`,
+        host: mqttHostForRegion(region),
+        accessCode: "",
+        serialNumber: serial,
+        model,
+        mode: "cloud",
+        region,
+      });
+      console.log(`\n✔ Saved cloud printer '${name}' (\`${id}\`, model ${model}).`);
+      console.log("The MCP server will auto-connect directly over Bambu Cloud MQTT on next start.");
+    }
   }
   process.exit(0);
 }

@@ -80,10 +80,16 @@ export function deriveTokenInfo(token: string): {
 } {
   const claims = decodeJwt(token);
   if (!claims) return {};
-  // The token carries a "username" claim already in "u_<uid>" form.
+  // The token may carry a "username" claim ("u_<uid>") or numeric uid/sub/user_id.
   let username: string | undefined =
-    typeof claims.username === "string" ? claims.username : undefined;
-  if (!username && claims.uid != null) username = `u_${claims.uid}`;
+    typeof claims.username === "string" && claims.username
+      ? claims.username
+      : undefined;
+  const rawUid = claims.uid ?? claims.user_id ?? claims.userId ?? claims.sub;
+  if (!username && rawUid != null && String(rawUid).trim() !== "") {
+    const s = String(rawUid).trim();
+    username = s.startsWith("u_") ? s : `u_${s}`;
+  }
   const expiresAt =
     typeof claims.exp === "number" ? claims.exp : undefined;
   return { username, expiresAt };
@@ -93,12 +99,32 @@ function buildLoginResult(data: any): LoginResult {
   const accessToken: string = data?.accessToken || "";
   if (accessToken) {
     const info = deriveTokenInfo(accessToken);
+    let username = info.username;
+    if (!username) {
+      const bodyUser =
+        data?.username ||
+        data?.user?.username ||
+        data?.uid ||
+        data?.userId ||
+        data?.user_id ||
+        data?.user?.uid ||
+        data?.user?.userId;
+      if (bodyUser != null && String(bodyUser).trim() !== "") {
+        const s = String(bodyUser).trim();
+        username = s.startsWith("u_") ? s : `u_${s}`;
+      }
+    }
+    const expiresAt =
+      info.expiresAt ??
+      (typeof data?.expiresIn === "number"
+        ? Math.floor(Date.now() / 1000) + data.expiresIn
+        : undefined);
     return {
       status: "success",
       accessToken,
       refreshToken: data?.refreshToken || undefined,
-      username: info.username,
-      expiresAt: info.expiresAt,
+      username,
+      expiresAt,
     };
   }
   const loginType: string = data?.loginType || "";
